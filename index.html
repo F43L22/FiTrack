@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b0c0f" />
+  <title>FiTrack</title>
+  <link rel="preconnect" href="https://zmllzvvlumsaolbnfknt.supabase.co" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ============ AUTH ============ -->
+  <main id="auth" class="auth" hidden>
+    <div class="auth-card">
+      <div class="brand"><span class="brand-dot"></span> FiTrack</div>
+      <p class="auth-sub">Your finances. Quietly organized.</p>
+
+      <div id="auth-error" class="banner banner-error" hidden></div>
+      <div id="auth-notice" class="banner banner-ok" hidden></div>
+
+      <form id="auth-form" autocomplete="on">
+        <label class="field">
+          <span>Email</span>
+          <input id="auth-email" type="email" required autocomplete="email" placeholder="you@example.com" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="auth-password" type="password" required minlength="6" autocomplete="current-password" placeholder="••••••••" />
+        </label>
+        <button id="auth-submit" type="submit" class="btn btn-primary btn-block">Sign in</button>
+      </form>
+
+      <p class="auth-toggle">
+        <span id="auth-toggle-text">New here?</span>
+        <a href="#" id="auth-toggle-link">Create an account</a>
+      </p>
+    </div>
+    <p class="auth-foot">End-to-end private · row-level secured · shared with whoever you invite</p>
+  </main>
+
+  <!-- ============ ONBOARDING ============ -->
+  <main id="onboard" class="auth" hidden>
+    <div class="auth-card">
+      <div class="brand"><span class="brand-dot"></span> FiTrack</div>
+      <p class="auth-sub">One last thing.</p>
+      <div id="onboard-error" class="banner banner-error" hidden></div>
+
+      <div class="seg" role="tablist">
+        <button class="seg-btn is-active" data-mode="create">Start fresh</button>
+        <button class="seg-btn" data-mode="join">Join a partner</button>
+      </div>
+
+      <form id="onboard-form">
+        <label class="field">
+          <span>Your name</span>
+          <input id="ob-name" type="text" required placeholder="Alex" />
+        </label>
+
+        <div data-when="create">
+          <label class="field">
+            <span>Household name</span>
+            <input id="ob-household" type="text" placeholder="Our Home" />
+          </label>
+          <label class="field">
+            <span>Currency</span>
+            <select id="ob-currency"></select>
+          </label>
+        </div>
+
+        <div data-when="join" hidden>
+          <label class="field">
+            <span>Invite code</span>
+            <input id="ob-code" type="text" placeholder="e.g. 4F9A2B7C" style="text-transform:uppercase" />
+          </label>
+          <p class="hint">Ask your partner for the code in their Settings → Household.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="ob-submit">Continue</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- ============ DASHBOARD ============ -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand brand-sm"><span class="brand-dot"></span> FiTrack</div>
+      </div>
+
+      <div class="period">
+        <button class="icon-btn" id="period-prev" aria-label="Previous">‹</button>
+        <button class="period-label" id="period-label">—</button>
+        <button class="icon-btn" id="period-next" aria-label="Next">›</button>
+        <div class="scope-toggle">
+          <button data-scope="month" class="is-active">Month</button>
+          <button data-scope="year">Year</button>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="member-filter" id="member-filter"></div>
+        <button class="btn btn-primary" id="add-tx">+ Add</button>
+        <button class="icon-btn" id="open-settings" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main class="dash" id="dash"></main>
+    <footer class="dash-foot">FiTrack · all figures update live across everyone in your household</footer>
+  </div>
+
+  <!-- ============ MODAL ROOT ============ -->
+  <div id="modal-root"></div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
