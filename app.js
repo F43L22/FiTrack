@@ -644,6 +644,21 @@ function openTxModal(existing) {
   const memOpts = (sel) =>
     state.members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.display_name)}</option>`).join("");
 
+  const repeatBlock = (existing && existing.recurring_id)
+    ? `<div class="mini-row" style="background:var(--accent-soft);border-radius:11px;padding:10px 12px;margin-bottom:14px">
+         <span class="grow" style="font-size:13.5px">🔁 Part of a recurring series</span>
+         <button type="button" class="btn btn-sm" data-action="edit-recurring" data-id="${existing.recurring_id}">Manage series</button>
+       </div>`
+    : `<div class="modal-row">
+         <label class="field"><span>Repeat</span><select id="tx-repeat">
+           <option value="none">One-time</option>
+           <option value="weekly">Weekly</option>
+           <option value="monthly">Monthly</option>
+           <option value="yearly">Yearly</option>
+         </select></label>
+         <label class="field" id="tx-every-wrap" hidden><span>Every</span><input id="tx-every" type="number" min="1" max="99" step="1" value="1" /></label>
+       </div>`;
+
   const html = `
     <div class="modal-head">
       <h2>${existing ? "Edit entry" : "New entry"}</h2>
@@ -663,16 +678,7 @@ function openTxModal(existing) {
       <div id="tx-cat-wrap"></div>
       <div id="tx-acc-wrap"></div>
       <label class="field"><span>Note (optional)</span><input id="tx-note" type="text" maxlength="120" value="${esc(t.note || "")}" placeholder="e.g. Weekly groceries" /></label>
-      ${existing ? "" : `
-      <div class="modal-row">
-        <label class="field"><span>Repeat</span><select id="tx-repeat">
-          <option value="none">One-time</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-          <option value="yearly">Yearly</option>
-        </select></label>
-        <label class="field" id="tx-every-wrap" hidden><span>Every</span><input id="tx-every" type="number" min="1" max="99" step="1" value="1" /></label>
-      </div>`}
+      ${repeatBlock}
       <div class="modal-actions">
         ${existing ? `<button type="button" class="btn btn-danger" data-action="del-tx-modal" data-id="${existing.id}">Delete</button>` : ""}
         <button type="submit" class="btn btn-primary">${existing ? "Save" : "Add"}</button>
@@ -724,30 +730,30 @@ function openTxModal(existing) {
         };
         if (kind === "transfer" && row.account_id === row.transfer_account_id)
           return toast("Pick two different accounts");
-        const rep = existing ? "none" : (repSel?.value || "none");
+        const rep = repSel ? (repSel.value || "none") : "none";
         const everyN = Math.max(1, parseInt($("#tx-every", m)?.value, 10) || 1);
         try {
           e.submitter.disabled = true;
-          if (existing) {
-            await api.update("transactions", `id=eq.${existing.id}`, row);
-          } else {
-            await api.insert("transactions", row);
-            if (rep !== "none") {
-              // log this occurrence now; schedule the rule from the next date forward
-              await api.insert("recurring", {
-                household_id: state.household.id,
-                kind: row.kind, amount: row.amount,
-                account_id: row.account_id, transfer_account_id: row.transfer_account_id,
-                category_id: row.category_id, member_id: row.member_id, note: row.note,
-                frequency: rep, every_n: everyN,
-                next_date: advanceDate(row.occurred_on, rep, everyN),
-                active: true,
-              });
-            }
+          let ruleId = null;
+          if (rep !== "none") {
+            // schedule the rule from the next date forward; this entry is occurrence #1
+            const rule = await api.insert("recurring", {
+              household_id: state.household.id,
+              kind: row.kind, amount: row.amount,
+              account_id: row.account_id, transfer_account_id: row.transfer_account_id,
+              category_id: row.category_id, member_id: row.member_id, note: row.note,
+              frequency: rep, every_n: everyN,
+              next_date: advanceDate(row.occurred_on, rep, everyN),
+              active: true,
+            });
+            ruleId = Array.isArray(rule) ? rule[0]?.id : rule?.id;
           }
+          const payload = ruleId ? { ...row, recurring_id: ruleId } : row;
+          if (existing) await api.update("transactions", `id=eq.${existing.id}`, payload);
+          else await api.insert("transactions", payload);
           closeModal();
           await reload();
-          toast(existing ? "Updated" : rep !== "none" ? "Added & scheduled to repeat" : "Added");
+          toast(rep !== "none" ? (existing ? "Saved & scheduled to repeat" : "Added & scheduled to repeat") : (existing ? "Updated" : "Added"));
         } catch (err) { toast(err.message); }
       });
     },
