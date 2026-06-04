@@ -616,6 +616,14 @@ function closeModal() {
 function escClose(e) { if (e.key === "Escape") closeModal(); }
 
 /* ---------- Add / edit transaction ---------- */
+function advanceDate(ymdStr, freq, n) {
+  const [y, m, d] = ymdStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (freq === "weekly") dt.setDate(dt.getDate() + 7 * n);
+  else if (freq === "yearly") dt.setFullYear(dt.getFullYear() + n);
+  else dt.setMonth(dt.getMonth() + n);
+  return dateStr(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+}
 function openTxModal(existing) {
   const t = existing || {
     kind: "expense",
@@ -655,6 +663,16 @@ function openTxModal(existing) {
       <div id="tx-cat-wrap"></div>
       <div id="tx-acc-wrap"></div>
       <label class="field"><span>Note (optional)</span><input id="tx-note" type="text" maxlength="120" value="${esc(t.note || "")}" placeholder="e.g. Weekly groceries" /></label>
+      ${existing ? "" : `
+      <div class="modal-row">
+        <label class="field"><span>Repeat</span><select id="tx-repeat">
+          <option value="none">One-time</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select></label>
+        <label class="field" id="tx-every-wrap" hidden><span>Every</span><input id="tx-every" type="number" min="1" max="99" step="1" value="1" /></label>
+      </div>`}
       <div class="modal-actions">
         ${existing ? `<button type="button" class="btn btn-danger" data-action="del-tx-modal" data-id="${existing.id}">Delete</button>` : ""}
         <button type="submit" class="btn btn-primary">${existing ? "Save" : "Add"}</button>
@@ -684,6 +702,10 @@ function openTxModal(existing) {
           paintFields();
         })
       );
+      const repSel = $("#tx-repeat", m);
+      if (repSel) repSel.addEventListener("change", () => {
+        $("#tx-every-wrap", m).hidden = repSel.value === "none";
+      });
       $("#tx-amount", m).focus();
       $("#tx-form", m).addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -702,13 +724,30 @@ function openTxModal(existing) {
         };
         if (kind === "transfer" && row.account_id === row.transfer_account_id)
           return toast("Pick two different accounts");
+        const rep = existing ? "none" : (repSel?.value || "none");
+        const everyN = Math.max(1, parseInt($("#tx-every", m)?.value, 10) || 1);
         try {
-          const btn = e.submitter; btn.disabled = true;
-          if (existing) await api.update("transactions", `id=eq.${existing.id}`, row);
-          else await api.insert("transactions", row);
+          e.submitter.disabled = true;
+          if (existing) {
+            await api.update("transactions", `id=eq.${existing.id}`, row);
+          } else {
+            await api.insert("transactions", row);
+            if (rep !== "none") {
+              // log this occurrence now; schedule the rule from the next date forward
+              await api.insert("recurring", {
+                household_id: state.household.id,
+                kind: row.kind, amount: row.amount,
+                account_id: row.account_id, transfer_account_id: row.transfer_account_id,
+                category_id: row.category_id, member_id: row.member_id, note: row.note,
+                frequency: rep, every_n: everyN,
+                next_date: advanceDate(row.occurred_on, rep, everyN),
+                active: true,
+              });
+            }
+          }
           closeModal();
           await reload();
-          toast(existing ? "Updated" : "Added");
+          toast(existing ? "Updated" : rep !== "none" ? "Added & scheduled to repeat" : "Added");
         } catch (err) { toast(err.message); }
       });
     },
