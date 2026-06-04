@@ -895,6 +895,47 @@ async function deleteRecurring(id) {
   } catch (e) { toast(e.message); }
 }
 
+/* ---------- Add account ---------- */
+const ACCOUNT_TYPES = ["checking", "savings", "cash", "credit", "investment", "other"];
+function openAccountModal(presetType) {
+  const html = `
+    <div class="modal-head"><h2>New account</h2><button class="icon-btn" data-close="1">✕</button></div>
+    <form id="acc-form">
+      <label class="field"><span>Name</span><input id="acc-name" type="text" maxlength="40" placeholder="e.g. Emergency Fund" required /></label>
+      <div class="modal-row">
+        <label class="field"><span>Type</span><select id="acc-type">
+          ${ACCOUNT_TYPES.map((t) => `<option value="${t}" ${t === (presetType || "savings") ? "selected" : ""}>${t}</option>`).join("")}
+        </select></label>
+        <label class="field"><span>Current balance</span><input id="acc-open" type="number" inputmode="decimal" step="0.01" value="0" /></label>
+      </div>
+      <p class="hint">Balance updates automatically as you add transactions and transfers to this account.</p>
+      <div class="modal-actions"><button type="submit" class="btn btn-primary">Add account</button></div>
+    </form>`;
+  openModal(html, {
+    onMount(m) {
+      $("#acc-name", m).focus();
+      $("#acc-form", m).addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          e.submitter.disabled = true;
+          await api.insert("accounts", {
+            household_id: state.household.id,
+            name: $("#acc-name", m).value.trim() || "Account",
+            type: $("#acc-type", m).value,
+            opening_balance: parseFloat($("#acc-open", m).value) || 0,
+            sort: state.accounts.length,
+          });
+          closeModal();
+          await loadAll();
+          render();
+          openSettings("accounts");
+          toast("Account added");
+        } catch (err) { toast(err.message); }
+      });
+    },
+  });
+}
+
 /* ---------- Settings ---------- */
 const CURRENCIES = ["USD","EUR","GBP","CAD","AUD","JPY","CHF","CNY","INR","BRL","MXN","ZAR","SEK","NOK","DKK","PLN","SGD","HKD","NZD","AED"];
 const SWATCHES = ["#6366f1","#10b981","#f59e0b","#ef4444","#0ea5e9","#8b5cf6","#ec4899","#14b8a6","#f97316","#22c55e","#64748b","#94a3b8"];
@@ -929,7 +970,7 @@ function renderSettings(scrollTo) {
     <div class="mini-row" data-aid="${a.id}">
       <input class="grow" value="${esc(a.name)}" data-action="acct-name" data-id="${a.id}" />
       <select data-action="acct-type" data-id="${a.id}">
-        ${["checking","savings","cash","credit","investment","other"].map((tp) => `<option value="${tp}" ${a.type === tp ? "selected" : ""}>${tp}</option>`).join("")}
+        ${ACCOUNT_TYPES.map((tp) => `<option value="${tp}" ${a.type === tp ? "selected" : ""}>${tp}</option>`).join("")}
       </select>
       <input class="num" style="width:96px" type="number" step="0.01" value="${Number(a.opening_balance)}" data-action="acct-open" data-id="${a.id}" title="Opening balance" />
       <button class="icon-btn" data-action="acct-del" data-id="${a.id}" title="Delete">✕</button>
@@ -1103,8 +1144,7 @@ document.addEventListener("click", async (e) => {
 
     /* accounts */
     case "acct-add":
-      await api.insert("accounts", { household_id: state.household.id, name: "New account", type: "checking", sort: state.accounts.length });
-      await loadAll(); renderSettings("accounts"); render();
+      openAccountModal();
       break;
     case "acct-del":
       if (confirm("Delete this account? Its transactions stay but lose their account link.")) {
