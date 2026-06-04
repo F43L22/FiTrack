@@ -73,15 +73,13 @@ Pages, an S3 bucket. Just upload the four files.
 
 ## First-time setup
 
-1. Open the app and **Create an account** (email + password).
-2. Confirm your email — the project requires email confirmation, so click the
-   link in the message Supabase sends you, then come back and **Sign in**.
-3. On the welcome step choose **Start fresh**, enter your name, your household
+1. Open the app and **Create an account** (email + password). You're signed in
+   instantly — no confirmation email to wait for.
+2. On the welcome step choose **Start fresh**, enter your name, your household
    name, and your currency.
-4. Open **Settings (⚙) → Household** to find your **invite code**.
-5. Your partner installs/opens FiTrack, signs up + confirms their email, then on
-   the welcome step picks **Join a partner** and enters your code. Done — you're
-   both on the same books.
+3. Open **Settings (⚙) → Household** to find your **invite code**.
+4. Your partner opens FiTrack, creates an account, then on the welcome step picks
+   **Join a partner** and enters your code. Done — you're both on the same books.
 
 ## Notes
 

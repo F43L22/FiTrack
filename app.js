@@ -61,9 +61,17 @@ async function authFetch(path, body, method = "POST") {
 }
 
 async function signUp(email, password) {
-  const data = await authFetch("/signup", { email, password });
-  if (data.access_token) { setSessionFromToken(data); return { confirmed: true }; }
-  return { confirmed: false };
+  // Create an already-confirmed account via the FiTrack sign-up function
+  // (no confirmation-email round trip), then sign in immediately.
+  const res = await fetch(`${CFG.SUPABASE_URL}/functions/v1/fitrack-signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: CFG.SUPABASE_ANON_KEY },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Could not create the account.");
+  await signIn(email, password);
+  return { confirmed: true };
 }
 async function signIn(email, password) {
   const data = await authFetch("/token?grant_type=password", { email, password });
