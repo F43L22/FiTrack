@@ -22,6 +22,8 @@ and years, and nothing you don't.
   they turn red when you go over.
 - **Savings goals** — track progress toward the holiday, the house, the buffer.
 - **Transfers** — move money between accounts without distorting income/spend.
+- **Recurring** — define rent, subscriptions, salary once; FiTrack auto-logs each
+  one when it comes due and backfills any dates missed since you last opened it.
 - **Private by design** — every row is protected by Postgres Row-Level Security.
   Only signed-in members of your household can read or write your data.
 - **Export** — download a full JSON backup of your household anytime.

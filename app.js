@@ -151,6 +151,7 @@ const state = {
   categories: [],
   transactions: [],
   goals: [],
+  recurring: [],
   me: null,
   scope: "month", // 'month' | 'year'
   cursor: new Date(),
@@ -162,18 +163,20 @@ async function loadAll() {
   if (!hh.length) { state.household = null; return false; }
   state.household = hh[0];
   const id = hh[0].id;
-  const [members, accounts, categories, goals, transactions] = await Promise.all([
+  const [members, accounts, categories, goals, transactions, recurring] = await Promise.all([
     api.select("members", `household_id=eq.${id}&order=created_at`),
     api.select("accounts", `household_id=eq.${id}&order=sort,created_at`),
     api.select("categories", `household_id=eq.${id}&order=kind.desc,sort`),
     api.select("goals", `household_id=eq.${id}&order=sort,created_at`),
     api.select("transactions", `household_id=eq.${id}&order=occurred_on.desc,created_at.desc`),
+    api.select("recurring", `household_id=eq.${id}&order=next_date`),
   ]);
   state.members = members;
   state.accounts = accounts;
   state.categories = categories;
   state.goals = goals;
   state.transactions = transactions;
+  state.recurring = recurring;
   state.me = members.find((m) => m.user_id === session.user.id) || null;
   return true;
 }
@@ -301,6 +304,7 @@ function render() {
     accountsCard() +
     spendingCard() +
     transactionsCard() +
+    recurringCard() +
     goalsCard();
 }
 
@@ -465,10 +469,58 @@ function accountsCard() {
     </section>`;
 }
 
+function freqLabel(r) {
+  const unit = r.frequency === "weekly" ? "week" : r.frequency === "yearly" ? "year" : "month";
+  return r.every_n === 1 ? `Every ${unit}` : `Every ${r.every_n} ${unit}s`;
+}
+function monthlyEquivalent(r) {
+  const a = Number(r.amount) || 0;
+  if (r.frequency === "weekly") return (a * 52) / 12 / r.every_n;
+  if (r.frequency === "yearly") return a / 12 / r.every_n;
+  return a / r.every_n;
+}
+function recurringCard() {
+  const rules = state.recurring.filter((r) => state.memberFilter === "all" || r.member_id === state.memberFilter);
+  if (!rules.length) {
+    return `
+      <section class="card col-6">
+        <div class="card-head"><span class="card-title">Recurring</span><button class="btn btn-ghost btn-sm" data-action="open-settings-tab" data-tab="recurring">+ Add</button></div>
+        <div class="empty">Rent, subscriptions, salary — set them once and FiTrack logs them automatically. <a href="#" data-action="open-settings-tab" data-tab="recurring">Add a recurring item.</a></div>
+      </section>`;
+  }
+  const active = rules.filter((r) => r.active);
+  const monthlyOut = active.filter((r) => r.kind === "expense").reduce((s, r) => s + monthlyEquivalent(r), 0);
+  const monthlyIn = active.filter((r) => r.kind === "income").reduce((s, r) => s + monthlyEquivalent(r), 0);
+  const rows = rules
+    .slice()
+    .sort((a, b) => (a.next_date < b.next_date ? -1 : 1))
+    .map((r) => {
+      const cat = catById(r.category_id);
+      const sign = r.kind === "income" ? "+" : r.kind === "expense" ? "−" : "";
+      const cls = r.kind === "income" ? "pos" : r.kind === "expense" ? "neg" : "";
+      const color = cat ? cat.color : "var(--ink-3)";
+      const title = r.note || (cat ? cat.name : r.kind === "income" ? "Income" : r.kind === "transfer" ? "Transfer" : "Expense");
+      return `
+        <div class="line-row" data-action="edit-recurring" data-id="${r.id}" style="cursor:pointer;${r.active ? "" : "opacity:.5"}">
+          <div class="lr-name"><span style="width:9px;height:9px;border-radius:3px;background:${esc(color)};flex:none"></span>
+            <div><div>${esc(title)}</div><div class="lr-sub">${freqLabel(r)} · next ${fmtDay(r.next_date)}${r.active ? "" : " · paused"}</div></div></div>
+          <div class="num ${cls}" style="font-weight:560">${sign}${fmt(r.amount)}</div>
+        </div>`;
+    })
+    .join("");
+  const foot = [monthlyOut ? `~${fmt(monthlyOut)} / mo out` : "", monthlyIn ? `~${fmt(monthlyIn)} / mo in` : ""].filter(Boolean).join(" · ");
+  return `
+    <section class="card col-6">
+      <div class="card-head"><span class="card-title">Recurring</span><button class="btn btn-ghost btn-sm" data-action="open-settings-tab" data-tab="recurring">Manage</button></div>
+      ${rows}
+      ${foot ? `<div class="cat-budget" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">${foot}</div>` : ""}
+    </section>`;
+}
+
 function goalsCard() {
   if (!state.goals.length) {
     return `
-      <section class="card col-12">
+      <section class="card col-6">
         <div class="card-head"><span class="card-title">Savings goals</span><button class="btn btn-ghost btn-sm" data-action="open-settings-tab" data-tab="goals">+ Add a goal</button></div>
         <div class="empty">Set aside for a holiday, a home, a rainy day. <a href="#" data-action="open-settings-tab" data-tab="goals">Create your first goal.</a></div>
       </section>`;
@@ -485,7 +537,7 @@ function goalsCard() {
     })
     .join("");
   return `
-    <section class="card col-12">
+    <section class="card col-6">
       <div class="card-head"><span class="card-title">Savings goals</span><button class="btn btn-ghost btn-sm" data-action="open-settings-tab" data-tab="goals">Manage</button></div>
       <div style="display:flex;gap:24px;flex-wrap:wrap">${items}</div>
     </section>`;
@@ -672,6 +724,132 @@ async function deleteTx(id) {
   } catch (e) { toast(e.message); }
 }
 
+/* ---------- Add / edit recurring rule ---------- */
+function openRecurringModal(existing) {
+  const today = dateStr(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
+  const r = existing || {
+    kind: "expense",
+    amount: "",
+    frequency: "monthly",
+    every_n: 1,
+    next_date: today,
+    account_id: state.accounts.find((a) => !a.archived)?.id || null,
+    transfer_account_id: null,
+    category_id: null,
+    member_id: state.me?.id || null,
+    note: "",
+    active: true,
+  };
+  let kind = r.kind;
+
+  const accOpts = (sel) =>
+    state.accounts.filter((a) => !a.archived).map((a) => `<option value="${a.id}" ${a.id === sel ? "selected" : ""}>${esc(a.name)}</option>`).join("");
+  const catOpts = (k, sel) =>
+    state.categories.filter((c) => c.kind === k && !c.archived).map((c) => `<option value="${c.id}" ${c.id === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+  const memOpts = (sel) =>
+    state.members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.display_name)}</option>`).join("");
+  const freqOpt = (v, l, sel) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`;
+
+  const html = `
+    <div class="modal-head">
+      <h2>${existing ? "Edit recurring" : "New recurring"}</h2>
+      <button class="icon-btn" data-close="1">✕</button>
+    </div>
+    <div class="type-seg">
+      <button type="button" class="exp ${kind === "expense" ? "is-active" : ""}" data-kind="expense">Expense</button>
+      <button type="button" class="inc ${kind === "income" ? "is-active" : ""}" data-kind="income">Income</button>
+      <button type="button" class="tr ${kind === "transfer" ? "is-active" : ""}" data-kind="transfer">Transfer</button>
+    </div>
+    <form id="rec-form">
+      <div class="amt-input"><span>${state.household?.currency || "USD"}</span><input id="rec-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" value="${r.amount || ""}" required /></div>
+      <div class="modal-row">
+        <label class="field"><span>Repeat</span><select id="rec-freq">
+          ${freqOpt("weekly", "Weekly", r.frequency)}${freqOpt("monthly", "Monthly", r.frequency)}${freqOpt("yearly", "Yearly", r.frequency)}
+        </select></label>
+        <label class="field"><span>Every</span><input id="rec-every" type="number" min="1" max="99" step="1" value="${r.every_n || 1}" required /></label>
+      </div>
+      <div class="modal-row">
+        <label class="field"><span>Next on</span><input id="rec-date" type="date" value="${r.next_date}" required /></label>
+        <label class="field"><span>Who</span><select id="rec-member">${memOpts(r.member_id)}</select></label>
+      </div>
+      <div id="rec-cat-wrap"></div>
+      <div id="rec-acc-wrap"></div>
+      <label class="field"><span>Name (optional)</span><input id="rec-note" type="text" maxlength="120" value="${esc(r.note || "")}" placeholder="e.g. Rent, Netflix, Salary" /></label>
+      <label class="mini-row" style="gap:8px"><input id="rec-active" type="checkbox" ${r.active ? "checked" : ""} style="width:auto" /> <span>Active (auto-logs on schedule)</span></label>
+      <div class="modal-actions">
+        ${existing ? `<button type="button" class="btn btn-danger" data-action="del-recurring-modal" data-id="${existing.id}">Delete</button>` : ""}
+        <button type="submit" class="btn btn-primary">${existing ? "Save" : "Add"}</button>
+      </div>
+    </form>`;
+
+  openModal(html, {
+    onMount(m) {
+      function paintFields() {
+        const catWrap = $("#rec-cat-wrap", m);
+        const accWrap = $("#rec-acc-wrap", m);
+        if (kind === "transfer") {
+          catWrap.innerHTML = "";
+          accWrap.innerHTML = `<div class="modal-row">
+            <label class="field"><span>From</span><select id="rec-acc">${accOpts(r.account_id)}</select></label>
+            <label class="field"><span>To</span><select id="rec-acc2">${accOpts(r.transfer_account_id)}</select></label></div>`;
+        } else {
+          catWrap.innerHTML = `<label class="field"><span>Category</span><select id="rec-cat">${catOpts(kind, r.category_id)}</select></label>`;
+          accWrap.innerHTML = `<label class="field"><span>Account</span><select id="rec-acc">${accOpts(r.account_id)}</select></label>`;
+        }
+      }
+      paintFields();
+      $$(".type-seg button", m).forEach((b) =>
+        b.addEventListener("click", () => {
+          kind = b.dataset.kind;
+          $$(".type-seg button", m).forEach((x) => x.classList.toggle("is-active", x === b));
+          paintFields();
+        })
+      );
+      $("#rec-amount", m).focus();
+      $("#rec-form", m).addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const amount = parseFloat($("#rec-amount", m).value);
+        if (!(amount >= 0)) return toast("Enter an amount");
+        const row = {
+          household_id: state.household.id,
+          kind,
+          amount,
+          frequency: $("#rec-freq", m).value,
+          every_n: Math.max(1, parseInt($("#rec-every", m).value, 10) || 1),
+          next_date: $("#rec-date", m).value,
+          member_id: $("#rec-member", m).value || null,
+          note: $("#rec-note", m).value.trim() || null,
+          active: $("#rec-active", m).checked,
+          account_id: $("#rec-acc", m)?.value || null,
+          transfer_account_id: kind === "transfer" ? $("#rec-acc2", m)?.value || null : null,
+          category_id: kind === "transfer" ? null : $("#rec-cat", m)?.value || null,
+        };
+        if (kind === "transfer" && row.account_id === row.transfer_account_id)
+          return toast("Pick two different accounts");
+        try {
+          e.submitter.disabled = true;
+          if (existing) await api.update("recurring", `id=eq.${existing.id}`, row);
+          else await api.insert("recurring", row);
+          // catch up immediately if it's already due
+          try { await api.rpc("run_recurring"); } catch {}
+          closeModal();
+          await reload();
+          toast(existing ? "Saved" : "Recurring added");
+        } catch (err) { toast(err.message); }
+      });
+    },
+  });
+}
+
+async function deleteRecurring(id) {
+  try {
+    await api.remove("recurring", `id=eq.${id}`);
+    closeModal();
+    await reload();
+    toast("Deleted");
+  } catch (e) { toast(e.message); }
+}
+
 /* ---------- Settings ---------- */
 const CURRENCIES = ["USD","EUR","GBP","CAD","AUD","JPY","CHF","CNY","INR","BRL","MXN","ZAR","SEK","NOK","DKK","PLN","SGD","HKD","NZD","AED"];
 const SWATCHES = ["#6366f1","#10b981","#f59e0b","#ef4444","#0ea5e9","#8b5cf6","#ec4899","#14b8a6","#f97316","#22c55e","#64748b","#94a3b8"];
@@ -728,6 +906,21 @@ function renderSettings(scrollTo) {
       )
       .join("");
 
+  const recurringRows = state.recurring
+    .map((r) => {
+      const cat = catById(r.category_id);
+      const title = r.note || (cat ? cat.name : r.kind === "income" ? "Income" : r.kind === "transfer" ? "Transfer" : "Expense");
+      const sign = r.kind === "income" ? "+" : r.kind === "expense" ? "−" : "";
+      return `
+    <div class="mini-row" data-rid="${r.id}">
+      <button type="button" class="btn btn-sm grow" style="justify-content:flex-start;text-align:left;font-weight:480" data-action="edit-recurring" data-id="${r.id}">
+        ${esc(title)} · ${sign}${fmt(r.amount)} · ${freqLabel(r).toLowerCase()} · next ${fmtDay(r.next_date)}${r.active ? "" : " · paused"}
+      </button>
+      <button class="icon-btn" data-action="rec-del" data-id="${r.id}" title="Delete">✕</button>
+    </div>`;
+    })
+    .join("");
+
   const goalRows = state.goals
     .map(
       (g) => `
@@ -770,6 +963,12 @@ function renderSettings(scrollTo) {
       <div class="mini-row"><button class="btn btn-sm" data-action="cat-add" data-kind="expense">+ Add expense category</button></div>
     </div>
 
+    <div class="settings-sec" data-sec="recurring">
+      <h3>Recurring</h3>${recurringRows || '<p class="hint">No recurring items yet.</p>'}
+      <div class="mini-row"><button class="btn btn-sm" data-action="rec-add">+ Add recurring</button></div>
+      <p class="hint">Due items log automatically whenever FiTrack is opened — any missed dates are backfilled.</p>
+    </div>
+
     <div class="settings-sec" data-sec="goals">
       <h3>Savings goals</h3>${goalRows || '<p class="hint">No goals yet.</p>'}
       <div class="mini-row"><button class="btn btn-sm" data-action="goal-add">+ Add goal</button></div>
@@ -805,6 +1004,7 @@ function exportData() {
     accounts: state.accounts,
     categories: state.categories,
     goals: state.goals,
+    recurring: state.recurring,
     transactions: state.transactions,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -890,6 +1090,29 @@ document.addEventListener("click", async (e) => {
         await api.remove("goals", `id=eq.${id}`);
         await loadAll(); renderSettings("goals"); render();
       }
+      break;
+
+    /* recurring */
+    case "edit-recurring": {
+      if (e.target.closest('[data-action="rec-del"]')) break;
+      const r = state.recurring.find((x) => x.id === id);
+      if (r) openRecurringModal(r);
+      break;
+    }
+    case "rec-add":
+      openRecurringModal(null);
+      break;
+    case "rec-del":
+      e.stopPropagation();
+      if (confirm("Delete this recurring item? Already-logged transactions stay.")) {
+        await api.remove("recurring", `id=eq.${id}`);
+        await loadAll();
+        if ($("#settings-body")) renderSettings("recurring");
+        render();
+      }
+      break;
+    case "del-recurring-modal":
+      if (confirm("Delete this recurring item? Already-logged transactions stay.")) deleteRecurring(id);
       break;
   }
 });
@@ -1027,8 +1250,17 @@ function wireOnboard() {
    Boot
    =========================================================== */
 async function boot() {
-  const ok = await loadAll();
+  // first pass to know whether a household exists
+  let ok = await loadAll();
   if (!ok) { show("onboard"); return; }
+  // materialize any due recurring transactions, then refresh if new ones were created
+  try {
+    const created = await api.rpc("run_recurring");
+    if (created && created > 0) {
+      await loadAll();
+      toast(`Added ${created} recurring ${created === 1 ? "entry" : "entries"}`);
+    }
+  } catch (e) { /* non-fatal */ }
   render();
 }
 
