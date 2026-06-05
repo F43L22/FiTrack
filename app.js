@@ -462,10 +462,18 @@ function accountsCard() {
         })
         .join("")
     : `<div class="empty">No accounts yet.</div>`;
+  const total = accs.reduce((s, a) => s + (balances[a.id] || 0), 0);
+  const totalRow = accs.length
+    ? `<div class="line-row" style="border-top:2px solid var(--line-strong);margin-top:4px">
+         <div class="lr-name" style="font-weight:600">Total</div>
+         <div class="num ${total < 0 ? "neg" : ""}" style="font-weight:680">${fmt(total)}</div>
+       </div>`
+    : "";
   return `
     <section class="card col-4">
       <div class="card-head"><span class="card-title">Accounts</span><button class="btn btn-ghost btn-sm" data-action="open-settings-tab" data-tab="accounts">Manage</button></div>
       ${rows}
+      ${totalRow}
     </section>`;
 }
 
@@ -952,6 +960,7 @@ function renderSettings(scrollTo) {
   const body = $("#settings-body");
   if (!body) return;
   const hh = state.household;
+  const acctBal = accountBalances();
 
   const memberRows = state.members
     .map(
@@ -972,7 +981,7 @@ function renderSettings(scrollTo) {
       <select data-action="acct-type" data-id="${a.id}">
         ${ACCOUNT_TYPES.map((tp) => `<option value="${tp}" ${a.type === tp ? "selected" : ""}>${tp}</option>`).join("")}
       </select>
-      <input class="num" style="width:96px" type="number" step="0.01" value="${Number(a.opening_balance)}" data-action="acct-open" data-id="${a.id}" title="Opening balance" />
+      <input class="num" style="width:104px" type="number" inputmode="decimal" step="0.01" value="${Number(acctBal[a.id] || 0).toFixed(2)}" data-action="acct-balance" data-id="${a.id}" title="Current balance — type your real balance here" />
       <button class="icon-btn" data-action="acct-del" data-id="${a.id}" title="Delete">✕</button>
     </div>`
     )
@@ -1040,6 +1049,7 @@ function renderSettings(scrollTo) {
     <div class="settings-sec" data-sec="accounts">
       <h3>Accounts</h3>${acctRows}
       <div class="mini-row"><button class="btn btn-sm" data-action="acct-add">+ Add account</button></div>
+      <p class="hint">The number on the right is each account’s <b>current balance</b> — type your real balance and the dashboard adjusts. It keeps updating automatically as you add transactions.</p>
     </div>
 
     <div class="settings-sec" data-sec="categories">
@@ -1215,7 +1225,15 @@ document.addEventListener("change", async (e) => {
     "member-color": () => patchAndRefresh("members", id, { color: v }, { quiet: true }),
     "acct-name": () => patchAndRefresh("accounts", id, { name: v.trim() || "Account" }, { quiet: true }),
     "acct-type": () => patchAndRefresh("accounts", id, { type: v }, { quiet: true }),
-    "acct-open": () => patchAndRefresh("accounts", id, { opening_balance: parseFloat(v) || 0 }, { quiet: true }),
+    "acct-balance": () => {
+      const acc = accById(id);
+      const target = parseFloat(v);
+      if (!acc || isNaN(target)) return;
+      // keep balance = opening + (sum of txn effects); solve opening so balance == target
+      const current = accountBalances()[id] || 0;
+      const newOpening = +(target - current + Number(acc.opening_balance)).toFixed(2);
+      patchAndRefresh("accounts", id, { opening_balance: newOpening }, { quiet: true });
+    },
     "cat-name": () => patchAndRefresh("categories", id, { name: v.trim() || "Category" }, { quiet: true }),
     "cat-color": () => patchAndRefresh("categories", id, { color: v }, { quiet: true }),
     "cat-budget": () => patchAndRefresh("categories", id, { monthly_budget: v === "" ? null : parseFloat(v) }, { quiet: true }),
